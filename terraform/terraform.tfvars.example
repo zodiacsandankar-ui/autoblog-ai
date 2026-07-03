@@ -1,0 +1,103 @@
+# =============================================================================
+# AutoBlog AI - Terraform Variables Example File
+# =============================================================================
+# Copy this file to terraform.tfvars and fill in the values.
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# NEVER commit terraform.tfvars to version control!
+
+# ---------------------------------------------------------------------------
+# General Configuration
+# ---------------------------------------------------------------------------
+project_name = "autoblog-ai"
+environment  = "production"
+aws_region   = "us-east-1"
+
+# ---------------------------------------------------------------------------
+# VPC Configuration
+# ---------------------------------------------------------------------------
+vpc_cidr             = "10.0.0.0/16"
+vpc_availability_zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
+vpc_private_subnets  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+vpc_public_subnets   = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+vpc_database_subnets = ["10.0.201.0/24", "10.0.202.0/24", "10.0.203.0/24"]
+vpc_single_nat_gateway = false
+
+# ---------------------------------------------------------------------------
+# EKS Cluster Configuration
+# ---------------------------------------------------------------------------
+eks_cluster_name       = "autoblog-ai-eks"
+eks_cluster_version    = "1.30"
+eks_node_instance_types = ["t3.medium", "t3.large"]
+eks_node_desired_size  = 3
+eks_node_min_size      = 3
+eks_node_max_size      = 20
+eks_node_disk_size     = 50
+
+# ---------------------------------------------------------------------------
+# RDS PostgreSQL Configuration
+# ---------------------------------------------------------------------------
+rds_instance_class       = "db.t3.medium"
+rds_allocated_storage    = 50
+rds_max_allocated_storage = 200
+rds_engine_version       = "16.3"
+rds_database_name        = "autoblog"
+rds_database_username    = "autoblog"
+rds_database_password    = "CHANGE_ME_TO_A_STRONG_PASSWORD_AT_LEAST_16_CHARS"
+rds_multi_az             = true
+rds_backup_retention_period = 30
+rds_deletion_protection  = true
+rds_skip_final_snapshot  = false
+
+# ---------------------------------------------------------------------------
+# ElastiCache Redis Configuration
+# ---------------------------------------------------------------------------
+elasticache_node_type            = "cache.t3.medium"
+elasticache_num_cache_nodes      = 2
+elasticache_engine_version       = "7.1"
+elasticache_snapshot_retention_limit = 7
+elasticache_automatic_failover   = true
+elasticache_multi_az             = true
+
+# ---------------------------------------------------------------------------
+# S3 Bucket Configuration
+# ---------------------------------------------------------------------------
+s3_bucket_name       = "autoblog-ai-content"
+s3_versioning_enabled = true
+s3_logging_bucket    = "autoblog-ai-logs"
+
+# ---------------------------------------------------------------------------
+# CloudFront CDN Configuration
+# ---------------------------------------------------------------------------
+cloudfront_price_class  = "PriceClass_100"
+cloudfront_aliases      = ["autoblog.ai", "www.autoblog.ai", "cdn.autoblog.ai"]
+cloudfront_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/your-cert-arn"
+cloudfront_default_ttl  = 3600
+cloudfront_max_ttl      = 86400
+
+# ---------------------------------------------------------------------------
+# Route53 DNS Configuration
+# ---------------------------------------------------------------------------
+route53_zone_name  = "autoblog.ai"
+route53_create_zone = true
+
+# ---------------------------------------------------------------------------
+# ACM Certificate Configuration
+# ---------------------------------------------------------------------------
+acm_certificate_domain          = "*.autoblog.ai"
+acm_certificate_alternative_names = ["autoblog.ai"]
+
+# ---------------------------------------------------------------------------
+# Monitoring and Logging
+# ---------------------------------------------------------------------------
+log_retention_days       = 90
+enable_detailed_monitoring = false
+
+# ---------------------------------------------------------------------------
+# Tags
+# ---------------------------------------------------------------------------
+tags = {
+  Project     = "AutoBlog AI"
+  Environment = "production"
+  ManagedBy   = "Terraform"
+}

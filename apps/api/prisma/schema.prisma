@@ -1,0 +1,1037 @@
+// ─────────────────────────────────────────────────────────────
+// AutoBlog AI — Enterprise AI Autonomous Blogging Platform
+// Prisma Schema — PostgreSQL
+// ─────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+
+  @@map("user_role")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+
+  @@map("user_status")
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MANAGER
+  EDITOR
+  MEMBER
+  VIEWER
+
+  @@map("org_role")
+}
+
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+
+  @@map("org_status")
+}
+
+enum PlanType {
+  FREE
+  STARTER
+  PROFESSIONAL
+  BUSINESS
+  ENTERPRISE
+
+  @@map("plan_type")
+}
+
+enum ProjectStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+
+  @@map("project_status")
+}
+
+enum TrendStatus {
+  DISCOVERED
+  RESEARCHED
+  APPROVED
+  REJECTED
+  SCHEDULED
+  PUBLISHED
+
+  @@map("trend_status")
+}
+
+enum KeywordType {
+  PRIMARY
+  SECONDARY
+  LONG_TAIL
+  SEMANTIC
+  LSI
+  QUESTION
+
+  @@map("keyword_type")
+}
+
+enum ArticleStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  REJECTED
+  ARCHIVED
+  DELETED
+
+  @@map("article_status")
+}
+
+enum TemplateType {
+  ARTICLE
+  EMAIL
+  SOCIAL
+  MEDIA
+  FAQ
+  SCHEMA
+
+  @@map("template_type")
+}
+
+enum WorkflowRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  RETRYING
+
+  @@map("workflow_run_status")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+  TRIALING
+
+  @@map("subscription_status")
+}
+
+enum WebsiteStatus {
+  DRAFT
+  PUBLISHED
+  MAINTENANCE
+  SUSPENDED
+
+  @@map("website_status")
+}
+
+enum ThemeCategory {
+  BLOG
+  MAGAZINE
+  CORPORATE
+  ECOMMERCE
+  PORTFOLIO
+  SAAS
+  NEWSLETTER
+  NICHE
+
+  @@map("theme_category")
+}
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
+  SCHEDULED
+  ARCHIVED
+
+  @@map("page_status")
+}
+
+enum CommentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SPAM
+
+  @@map("comment_status")
+}
+
+enum SubscriberStatus {
+  ACTIVE
+  UNSUBSCRIBED
+  BOUNCED
+
+  @@map("subscriber_status")
+}
+
+// ─────────────────────────────────────────────────────────────
+// MODELS
+// ─────────────────────────────────────────────────────────────
+
+/// Core user account for the AutoBlog AI platform.
+model User {
+  id               String     @id @default(cuid()) @map("id")
+  email            String     @unique @map("email")
+  passwordHash     String     @map("password_hash")
+  name             String     @map("name")
+  avatar           String?    @map("avatar")
+  role             UserRole   @default(USER) @map("role")
+  status           UserStatus @default(ACTIVE) @map("status")
+  emailVerified    Boolean    @default(false) @map("email_verified")
+  twoFactorEnabled Boolean    @default(false) @map("two_factor_enabled")
+  twoFactorSecret  String?    @map("two_factor_secret")
+  lastLoginAt      DateTime?  @map("last_login_at")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+  deletedAt        DateTime?  @map("deleted_at")
+
+  organizations OrganizationMember[]
+  sessions      Session[]
+  apiKeys       ApiKey[]
+  auditLogs     AuditLog[]
+  articles      Article[]
+  projects      Project[]
+  notifications Notification[]
+  subscriptions Subscription[]
+
+  @@index([email])
+  @@index([role])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+/// Organization / workspace for team collaboration.
+model Organization {
+  id        String    @id @default(cuid()) @map("id")
+  name      String    @map("name")
+  slug      String    @unique @map("slug")
+  logo      String?   @map("logo")
+  plan      PlanType  @default(FREE) @map("plan")
+  status    OrgStatus @default(ACTIVE) @map("status")
+  settings  Json      @default("{}") @map("settings")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  members       OrganizationMember[]
+  projects      Project[]
+  subscriptions Subscription[]
+
+  @@index([slug])
+  @@index([status])
+  @@map("organizations")
+}
+
+/// Many-to-many relation between users and organizations with role assignment.
+model OrganizationMember {
+  id             String   @id @default(cuid()) @map("id")
+  userId         String   @map("user_id")
+  organizationId String   @map("organization_id")
+  role           OrgRole  @map("role")
+  permissions    Json?    @map("permissions")
+  invitedBy      String?  @map("invited_by")
+  joinedAt       DateTime? @map("joined_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([role])
+  @@map("organization_members")
+}
+
+/// Authenticated session for a user.
+model Session {
+  id        String    @id @default(cuid()) @map("id")
+  userId    String    @map("user_id")
+  token     String    @unique @map("token")
+  expiresAt DateTime  @map("expires_at")
+  ipAddress String?   @map("ip_address")
+  userAgent String?   @map("user_agent")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+/// API key for programmatic access.
+model ApiKey {
+  id          String    @id @default(cuid()) @map("id")
+  userId      String    @map("user_id")
+  name        String    @map("name")
+  keyHash     String    @map("key_hash")
+  keyPrefix   String    @map("key_prefix")
+  scopes      String[]  @default([]) @map("scopes")
+  lastUsedAt  DateTime? @map("last_used_at")
+  expiresAt   DateTime? @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([keyPrefix])
+  @@index([revokedAt])
+  @@map("api_keys")
+}
+
+/// Audit trail for user and system actions.
+model AuditLog {
+  id         String   @id @default(cuid()) @map("id")
+  userId     String?  @map("user_id")
+  action     String   @map("action")
+  resource   String   @map("resource")
+  resourceId String   @map("resource_id")
+  metadata   Json?    @map("metadata")
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([resource, resourceId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+/// AI provider configuration (OpenAI, Anthropic, etc.).
+model AiProvider {
+  id              String   @id @default(cuid()) @map("id")
+  name            String   @map("name")
+  displayName     String   @map("display_name")
+  baseUrl         String   @map("base_url")
+  apiKey          String   @map("api_key")
+  isDefault       Boolean  @default(false) @map("is_default")
+  isActive        Boolean  @default(true) @map("is_active")
+  priority        Int      @default(0) @map("priority")
+  models          Json     @map("models")
+  rateLimitRpm    Int?     @map("rate_limit_rpm")
+  rateLimitRpd    Int?     @map("rate_limit_rpd")
+  costPer1kTokens Json?    @map("cost_per1k_tokens")
+  organizationId  String?  @map("organization_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId])
+  @@index([isActive, isDefault])
+  @@map("ai_providers")
+}
+
+/// Content project that groups articles, keywords, trends, etc.
+model Project {
+  id               String        @id @default(cuid()) @map("id")
+  name             String        @map("name")
+  slug             String        @map("slug")
+  description      String?       @map("description")
+  language         String?       @map("language")
+  targetCountry    String?       @map("target_country")
+  tone             String?       @map("tone")
+  writingStyle     String?       @map("writing_style")
+  articleLength    Int?          @map("article_length")
+  postingFrequency String?       @map("posting_frequency")
+  timezone         String?       @map("timezone")
+  settings         Json?         @map("settings")
+  status           ProjectStatus @default(ACTIVE) @map("status")
+  organizationId   String        @map("organization_id")
+  userId           String        @map("user_id")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  organization       Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  articles           Article[]
+  keywords           Keyword[]
+  trends             Trend[]
+  competitors        Competitor[]
+  workflows          Workflow[]
+  website            Website?
+  publishingPlatforms PublishingPlatform[]
+  analyticsConfigs   AnalyticsConfig[]
+  scheduledPosts     ScheduledPost[]
+  webhooks           Webhook[]
+  images             Image[]
+  contentTemplates   ContentTemplate[]
+  analyticsSnapshots AnalyticsSnapshot[]
+  tokenUsages        TokenUsage[]
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@index([slug])
+  @@map("projects")
+}
+
+/// Trending topic discovered for content creation.
+model Trend {
+  id               String      @id @default(cuid()) @map("id")
+  title            String      @map("title")
+  category         String?     @map("category")
+  compositeScore   Int?        @map("composite_score")
+  searchVolume     Int?        @map("search_volume")
+  trendGrowth      Float?      @map("trend_growth")
+  viralityScore    Int?        @map("virality_score")
+  socialMentions   Int?        @map("social_mentions")
+  newsFrequency    Int?        @map("news_frequency")
+  businessPotential Int?       @map("business_potential")
+  userIntent       String?     @map("user_intent")
+  seasonalityIndex Float?      @map("seasonality_index")
+  rawData          Json?       @map("raw_data")
+  status           TrendStatus @default(DISCOVERED) @map("status")
+  source           String?     @map("source")
+  projectId        String      @map("project_id")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([status])
+  @@index([compositeScore])
+  @@map("trends")
+}
+
+/// SEO keyword tracked for a project.
+model Keyword {
+  id              String      @id @default(cuid()) @map("id")
+  term            String      @map("term")
+  type            KeywordType @default(PRIMARY) @map("type")
+  searchVolume    Int?        @map("search_volume")
+  difficulty      Int?        @map("difficulty")
+  cpc             Float?      @map("cpc")
+  intent          String?     @map("intent")
+  priority        Int?        @map("priority")
+  clusterName     String?     @map("cluster_name")
+  clusterId       String?     @map("cluster_id")
+  opportunityScore Int?       @map("opportunity_score")
+  projectId       String      @map("project_id")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([term])
+  @@index([type])
+  @@index([clusterId])
+  @@map("keywords")
+}
+
+/// Competitor analysis record for a project.
+model Competitor {
+  id               String   @id @default(cuid()) @map("id")
+  url              String   @map("url")
+  title            String?  @map("title")
+  metaDescription  String?  @map("meta_description")
+  wordCount        Int?     @map("word_count")
+  headingCount     Int?     @map("heading_count")
+  internalLinks    Int?     @map("internal_links")
+  externalLinks    Int?     @map("external_links")
+  images           Int?     @map("images")
+  readabilityScore Float?   @map("readability_score")
+  schemaTypes      String[] @default([]) @map("schema_types")
+  contentGaps      Json?    @map("content_gaps")
+  backlinksCount   Int?     @map("backlinks_count")
+  domainAuthority  Int?     @map("domain_authority")
+  socialShares     Int?     @map("social_shares")
+  pageSpeed        Float?   @map("page_speed")
+  projectId        String   @map("project_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([url])
+  @@index([domainAuthority])
+  @@map("competitors")
+}
+
+/// AI-generated or manually authored article.
+model Article {
+  id                  String        @id @default(cuid()) @map("id")
+  title               String        @map("title")
+  slug                String        @map("slug")
+  metaTitle           String?       @map("meta_title")
+  metaDescription     String?       @map("meta_description")
+  ogTitle             String?       @map("og_title")
+  ogDescription       String?       @map("og_description")
+  twitterCard         String?       @map("twitter_card")
+  introduction        String        @map("introduction") @db.Text
+  tableOfContents     Json?         @map("table_of_contents")
+  content             String?       @map("content") @db.Text
+  faq                 Json?         @map("faq")
+  schemaMarkup        Json?         @map("schema_markup")
+  conclusion          String?       @map("conclusion") @db.Text
+  cta                 String?       @map("cta") @db.Text
+  authorBox           Json?         @map("author_box")
+  references          Json?         @map("references")
+  internalLinks       Json?         @map("internal_links")
+  externalLinks       Json?         @map("external_links")
+  imagePrompts        Json?         @map("image_prompts")
+  images              String[]      @default([]) @map("images")
+  featuredImage       String?       @map("featured_image")
+  seoScore            Int?          @map("seo_score")
+  readabilityScore    Float?        @map("readability_score")
+  aiDetectionScore    Float?        @map("ai_detection_score")
+  wordCount           Int?          @map("word_count")
+  readingTime         Int?          @map("reading_time")
+  keywordDensity      Json?         @map("keyword_density")
+  status              ArticleStatus @default(DRAFT) @map("status")
+  publishAt           DateTime?     @map("publish_at")
+  publishedAt         DateTime?     @map("published_at")
+  publishedTo         Json?         @map("published_to")
+  scheduleConfig      Json?         @map("schedule_config")
+  aiProviderId        String?       @map("ai_provider_id")
+  generationId        String?       @map("generation_id")
+  projectId           String        @map("project_id")
+  userId              String?       @map("user_id")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+
+  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user             User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  publishingRecords PublishingRecord[]
+  articleVersions  ArticleVersion[]
+  scheduledPosts   ScheduledPost[]
+  comments         Comment[]
+  seoAudits        SeoAudit[]
+  articleImages    Image[]
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([slug])
+  @@index([status])
+  @@index([publishAt])
+  @@index([publishedAt])
+  @@index([seoScore])
+  @@map("articles")
+}
+
+/// Version history snapshot of an article.
+model ArticleVersion {
+  id        String   @id @default(cuid()) @map("id")
+  articleId String   @map("article_id")
+  version   Int      @map("version")
+  content   String   @map("content") @db.Text
+  metadata  Json?    @map("metadata")
+  diff      String?  @map("diff") @db.Text
+  reason    String?  @map("reason")
+  userId    String?  @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, version])
+  @@index([articleId])
+  @@index([userId])
+  @@map("article_versions")
+}
+
+/// Reusable content template (article, email, social, FAQ, schema).
+model ContentTemplate {
+  id        String       @id @default(cuid()) @map("id")
+  name      String       @map("name")
+  type      TemplateType @map("type")
+  structure Json         @map("structure")
+  prompts   Json?        @map("prompts")
+  isPublic  Boolean      @default(false) @map("is_public")
+  projectId String?      @map("project_id")
+  userId    String?      @map("user_id")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([userId])
+  @@index([type])
+  @@index([isPublic])
+  @@map("content_templates")
+}
+
+/// Generated or uploaded image associated with content.
+model Image {
+  id          String   @id @default(cuid()) @map("id")
+  url         String   @map("url")
+  key         String?  @map("key")
+  filename    String   @map("filename")
+  prompt      String?  @map("prompt")
+  altText     String?  @map("alt_text")
+  seoFilename String?  @map("seo_filename")
+  provider    String?  @map("provider")
+  width       Int?     @map("width")
+  height      Int?     @map("height")
+  size        Int?     @map("size")
+  variants    Json?    @map("variants")
+  metadata    Json?    @map("metadata")
+  articleId   String?  @map("article_id")
+  projectId   String?  @map("project_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  article Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+  @@index([projectId])
+  @@index([provider])
+  @@map("images")
+}
+
+/// Scheduled publication entry for an article.
+model ScheduledPost {
+  id        String   @id @default(cuid()) @map("id")
+  articleId String   @map("article_id")
+  projectId String   @map("project_id")
+  publishAt DateTime @map("publish_at")
+  timezone  String?  @map("timezone")
+  platforms Json?    @map("platforms")
+  priority  Int      @default(0) @map("priority")
+  status    String   @map("status")
+  config    Json?    @map("config")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+  @@index([projectId])
+  @@index([publishAt])
+  @@index([status])
+  @@map("scheduled_posts")
+}
+
+/// Record of an article being published to an external platform.
+model PublishingRecord {
+  id             String   @id @default(cuid()) @map("id")
+  articleId      String   @map("article_id")
+  platform       String   @map("platform")
+  platformPostId String?  @map("platform_post_id")
+  url            String?  @map("url")
+  status         String   @map("status")
+  metadata       Json?    @map("metadata")
+  error          String?  @map("error")
+  publishedAt    DateTime? @map("published_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+  @@index([platform])
+  @@index([status])
+  @@map("publishing_records")
+}
+
+/// External publishing platform configuration (WordPress, Medium, etc.).
+model PublishingPlatform {
+  id        String   @id @default(cuid()) @map("id")
+  projectId String   @map("project_id")
+  type      String   @map("type")
+  name      String   @map("name")
+  config    Json?    @map("config")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([isActive])
+  @@map("publishing_platforms")
+}
+
+/// Daily analytics snapshot for a project.
+model AnalyticsSnapshot {
+  id        String   @id @default(cuid()) @map("id")
+  projectId String   @map("project_id")
+  date      DateTime @map("date")
+  metrics   Json?    @map("metrics")
+  rankings  Json?    @map("rankings")
+  traffic   Json?    @map("traffic")
+  revenue   Float?   @map("revenue")
+  costs     Float?   @map("costs")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([date])
+  @@unique([projectId, date])
+  @@map("analytics_snapshots")
+}
+
+/// Analytics integration configuration (GA4, GSC, etc.).
+model AnalyticsConfig {
+  id           String  @id @default(cuid()) @map("id")
+  projectId    String  @unique @map("project_id")
+  ga4PropertyId String? @map("ga4_property_id")
+  gscSiteUrl   String? @map("gsc_site_url")
+  serpApiKey   String? @map("serp_api_key")
+  mozAccessId  String? @map("moz_access_id")
+  mozSecretKey String? @map("moz_secret_key")
+  ahrefsApiKey String? @map("ahrefs_api_key")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("analytics_configs")
+}
+
+/// SEO audit result for a published article.
+model SeoAudit {
+  id                           String   @id @default(cuid()) @map("id")
+  articleId                    String   @map("article_id")
+  score                        Int?     @map("score")
+  issues                       Json?    @map("issues")
+  optimizedContent             String?  @map("optimized_content") @db.Text
+  metaTags                     Json?    @map("meta_tags")
+  schemaMarkup                 Json?    @map("schema_markup")
+  keywordDensity               Json?    @map("keyword_density")
+  featuredSnippetOptimization  Json?    @map("featured_snippet_optimization")
+  createdAt                    DateTime @default(now()) @map("created_at")
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId])
+  @@index([score])
+  @@map("seo_audits")
+}
+
+/// Configurable workflow for content automation.
+model Workflow {
+  id           String   @id @default(cuid()) @map("id")
+  name         String   @map("name")
+  description  String?  @map("description")
+  trigger      Json     @map("trigger")
+  steps        Json     @map("steps")
+  isActive     Boolean  @default(true) @map("is_active")
+  lastRunAt    DateTime? @map("last_run_at")
+  nextRunAt    DateTime? @map("next_run_at")
+  runCount     Int      @default(0) @map("run_count")
+  successCount Int      @default(0) @map("success_count")
+  failureCount Int      @default(0) @map("failure_count")
+  projectId    String   @map("project_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runs    WorkflowRun[]
+
+  @@index([projectId])
+  @@index([isActive])
+  @@map("workflows")
+}
+
+/// Execution record of a workflow run.
+model WorkflowRun {
+  id          String           @id @default(cuid()) @map("id")
+  workflowId  String           @map("workflow_id")
+  status      WorkflowRunStatus @map("status")
+  input       Json?            @map("input")
+  output      Json?            @map("output")
+  error       String?          @map("error")
+  startedAt   DateTime?        @map("started_at")
+  completedAt DateTime?        @map("completed_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("workflow_runs")
+}
+
+/// Billing subscription for a user or organization.
+model Subscription {
+  id                    String             @id @default(cuid()) @map("id")
+  userId                String?            @map("user_id")
+  organizationId        String?            @map("organization_id")
+  plan                  PlanType           @map("plan")
+  status                SubscriptionStatus @map("status")
+  stripeCustomerId      String?            @map("stripe_customer_id")
+  stripeSubscriptionId  String?            @map("stripe_subscription_id")
+  currentPeriodStart    DateTime?          @map("current_period_start")
+  currentPeriodEnd      DateTime?          @map("current_period_end")
+  cancelAtPeriodEnd     Boolean            @default(false) @map("cancel_at_period_end")
+  usage                 Json?              @map("usage")
+  limits                Json?              @map("limits")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([stripeCustomerId])
+  @@map("subscriptions")
+}
+
+/// In-app notification for a user.
+model Notification {
+  id        String    @id @default(cuid()) @map("id")
+  userId    String    @map("user_id")
+  type      String    @map("type")
+  title     String    @map("title")
+  message   String    @map("message")
+  data      Json?     @map("data")
+  isRead    Boolean   @default(false) @map("is_read")
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+/// Token usage record for AI provider billing and monitoring.
+model TokenUsage {
+  id               String   @id @default(cuid()) @map("id")
+  provider         String   @map("provider")
+  model            String   @map("model")
+  promptTokens     Int      @map("prompt_tokens")
+  completionTokens Int      @map("completion_tokens")
+  totalTokens      Int      @map("total_tokens")
+  cost             Decimal  @map("cost") @db.Decimal(10, 6)
+  organizationId   String?  @map("organization_id")
+  projectId        String?  @map("project_id")
+  articleId        String?  @map("article_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([projectId])
+  @@index([articleId])
+  @@index([provider, model])
+  @@index([createdAt])
+  @@map("token_usage")
+}
+
+/// Published website associated with a project (one-to-one).
+model Website {
+  id                String        @id @default(cuid()) @map("id")
+  projectId         String        @unique @map("project_id")
+  domain            String        @unique @map("domain")
+  subdomain         String        @unique @map("subdomain")
+  customDomain      String?       @unique @map("custom_domain")
+  sslEnabled        Boolean       @default(false) @map("ssl_enabled")
+  sslCertificate    String?       @map("ssl_certificate") @db.Text
+  status            WebsiteStatus @default(DRAFT) @map("status")
+  themeId           String?       @map("theme_id")
+  themeConfig       Json?         @map("theme_config")
+  siteTitle         String?       @map("site_title")
+  siteDescription   String?       @map("site_description")
+  siteLogo          String?       @map("site_logo")
+  favicon           String?       @map("favicon")
+  googleAnalyticsId String?       @map("google_analytics_id")
+  gtmId             String?       @map("gtm_id")
+  socialLinks       Json?         @map("social_links")
+  headerConfig      Json?         @map("header_config")
+  footerConfig      Json?         @map("footer_config")
+  homePage          Json?         @map("home_page")
+  customPages       Json?         @map("custom_pages")
+  settings          Json?         @map("settings")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  project     Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  theme       Theme?        @relation(fields: [themeId], references: [id], onDelete: SetNull)
+  subscribers   Subscriber[]
+  customPageItems CustomPage[]
+
+  @@index([projectId])
+  @@index([domain])
+  @@index([subdomain])
+  @@index([status])
+  @@map("websites")
+}
+
+/// Visual theme for websites powered by the platform.
+model Theme {
+  id              String        @id @default(cuid()) @map("id")
+  name            String        @map("name")
+  slug            String        @unique @map("slug")
+  description     String?       @map("description")
+  preview         String?       @map("preview")
+  category        ThemeCategory @default(BLOG) @map("category")
+  thumbnail       String?       @map("thumbnail")
+  screenshots     Json?         @map("screenshots")
+  defaultConfig   Json?         @map("default_config")
+  cssVariables    String?       @map("css_variables") @db.Text
+  customCSS       String?       @map("custom_css") @db.Text
+  availableBlocks Json?         @map("available_blocks")
+  isPublic        Boolean       @default(false) @map("is_public")
+  isOfficial      Boolean       @default(false) @map("is_official")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  websites Website[]
+
+  @@index([slug])
+  @@index([category])
+  @@index([isPublic, isOfficial])
+  @@map("themes")
+}
+
+/// Custom page for a website (about, contact, etc.).
+model CustomPage {
+  id             String     @id @default(cuid()) @map("id")
+  websiteId      String     @map("website_id")
+  slug           String     @map("slug")
+  title          String     @map("title")
+  metaDescription String?   @map("meta_description")
+  blocks         Json?      @map("blocks")
+  schemaMarkup   Json?      @map("schema_markup")
+  canonicalUrl   String?    @map("canonical_url")
+  noindex        Boolean    @default(false) @map("noindex")
+  status         PageStatus @default(DRAFT) @map("status")
+  publishedAt    DateTime?  @map("published_at")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, slug])
+  @@index([websiteId])
+  @@index([status])
+  @@map("custom_pages")
+}
+
+/// Comment on an article (supports nested replies).
+model Comment {
+  id           String        @id @default(cuid()) @map("id")
+  articleId    String        @map("article_id")
+  parentId     String?       @map("parent_id")
+  authorName   String        @map("author_name")
+  authorEmail  String        @map("author_email")
+  authorAvatar String?       @map("author_avatar")
+  userId       String?       @map("user_id")
+  content      String        @map("content")
+  status       CommentStatus @default(PENDING) @map("status")
+  isFlagged    Boolean       @default(false) @map("is_flagged")
+  flagReason   String?       @map("flag_reason")
+  moderatedBy  String?       @map("moderated_by")
+  moderatedAt  DateTime?     @map("moderated_at")
+  likes        Int           @default(0) @map("likes")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  article  Article   @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: SetNull)
+  replies  Comment[] @relation("CommentReplies")
+
+  @@index([articleId])
+  @@index([parentId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("comments")
+}
+
+/// Newsletter / website subscriber.
+model Subscriber {
+  id            String           @id @default(cuid()) @map("id")
+  websiteId     String           @map("website_id")
+  email         String           @map("email")
+  name          String?          @map("name")
+  status        SubscriberStatus @default(ACTIVE) @map("status")
+  preferences   Json?            @map("preferences")
+  verifiedAt    DateTime?        @map("verified_at")
+  verifyToken   String?          @map("verify_token")
+  source        String?          @map("source")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, email])
+  @@index([websiteId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("subscribers")
+}
+
+/// Extendable plugin for the platform.
+model Plugin {
+  id             String   @id @default(cuid()) @map("id")
+  name           String   @map("name")
+  slug           String   @unique @map("slug")
+  description    String?  @map("description")
+  version        String?  @map("version")
+  author         String?  @map("author")
+  icon           String?  @map("icon")
+  entryPoint     String   @map("entry_point")
+  config         Json?    @map("config")
+  permissions    String[] @default([]) @map("permissions")
+  isActive       Boolean  @default(false) @map("is_active")
+  isPublic       Boolean  @default(false) @map("is_public")
+  organizationId String?  @map("organization_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([slug])
+  @@index([isActive, isPublic])
+  @@index([organizationId])
+  @@map("plugins")
+}
+
+/// Outgoing webhook configuration for a project.
+model Webhook {
+  id              String   @id @default(cuid()) @map("id")
+  projectId       String   @map("project_id")
+  name            String   @map("name")
+  url             String   @map("url")
+  secret          String?  @map("secret")
+  events          String[] @default([]) @map("events")
+  headers         Json?    @map("headers")
+  isActive        Boolean  @default(true) @map("is_active")
+  lastTriggeredAt DateTime? @map("last_triggered_at")
+  successCount    Int      @default(0) @map("success_count")
+  failureCount    Int      @default(0) @map("failure_count")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([isActive])
+  @@map("webhooks")
+}

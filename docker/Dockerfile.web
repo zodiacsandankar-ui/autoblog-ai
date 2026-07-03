@@ -1,0 +1,29 @@
+FROM node:20-alpine AS base
+RUN corepack enable && corepack prepare pnpm@8.15.0 --activate
+WORKDIR /app
+
+FROM base AS development
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/web/package.json apps/web/tsconfig.json apps/web/next.config.js ./apps/web/
+COPY packages ./packages
+RUN pnpm install --frozen-lockfile
+WORKDIR /app/apps/web
+CMD ["pnpm", "run", "dev"]
+
+FROM base AS build
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/web/package.json apps/web/tsconfig.json apps/web/next.config.js ./apps/web/
+COPY packages ./packages
+RUN pnpm install --frozen-lockfile
+COPY apps/web ./apps/web
+RUN pnpm run build --filter=web
+
+FROM node:20-alpine AS production
+WORKDIR /app
+COPY --from=build /app/apps/web/.next ./.next
+COPY --from=build /app/apps/web/node_modules ./node_modules
+COPY --from=build /app/apps/web/package.json ./
+COPY --from=build /app/apps/web/public ./public
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["node_modules/.bin/next", "start"]

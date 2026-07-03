@@ -1,0 +1,159 @@
+name: Deploy Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  docker:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,format=long
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: sigstore/cosign-installer@v3
+      - run: |
+          cosign sign --yes ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.meta.outputs.digest }}
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [docker]
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.autoblog.ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+      - name: Configure kubeconfig
+        run: echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > kubeconfig
+      - name: Update image tags
+        run: |
+          sed -i "s|image: .*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}|g" k8s/api-deployment.yaml
+          sed -i "s|image: .*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}|g" k8s/web-deployment.yaml
+      - name: Deploy manifests
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/configmap.yaml
+          kubectl apply -f k8s/secrets.yaml
+          kubectl apply -f k8s/api-deployment.yaml
+          kubectl apply -f k8s/api-service.yaml
+          kubectl apply -f k8s/api-hpa.yaml
+          kubectl apply -f k8s/web-deployment.yaml
+          kubectl apply -f k8s/web-service.yaml
+          kubectl apply -f k8s/web-hpa.yaml
+          kubectl apply -f k8s/postgres-statefulset.yaml
+          kubectl apply -f k8s/postgres-service.yaml
+          kubectl apply -f k8s/redis-deployment.yaml
+          kubectl apply -f k8s/redis-service.yaml
+          kubectl apply -f k8s/ingress.yaml
+          kubectl apply -f k8s/network-policy.yaml
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/autoblog-api -n autoblog --timeout=300s
+          kubectl rollout status deployment/autoblog-web -n autoblog --timeout=300s
+      - name: Health check
+        run: |
+          kubectl run hc --image=curlimages/curl:latest -n autoblog --restart=Never --rm -i -- curl -sf http://autoblog-api:3001/health
+          kubectl run hc2 --image=curlimages/curl:latest -n autoblog --restart=Never --rm -i -- curl -sf http://autoblog-web:3000/health
+
+  approval-gate:
+    name: Production Approval
+    needs: [deploy-staging]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://autoblog.ai
+    steps:
+      - run: echo "Approved for production"
+
+  deploy-production:
+    name: Deploy to Production
+    needs: [approval-gate]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://autoblog.ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+      - name: Configure kubeconfig
+        run: echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > kubeconfig
+      - name: Update image tags
+        run: |
+          sed -i "s|image: .*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}|g" k8s/api-deployment.yaml
+          sed -i "s|image: .*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}|g" k8s/web-deployment.yaml
+      - name: Deploy manifests
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/configmap.yaml
+          kubectl apply -f k8s/secrets.yaml
+          kubectl apply -f k8s/api-deployment.yaml
+          kubectl apply -f k8s/api-service.yaml
+          kubectl apply -f k8s/api-hpa.yaml
+          kubectl apply -f k8s/web-deployment.yaml
+          kubectl apply -f k8s/web-service.yaml
+          kubectl apply -f k8s/web-hpa.yaml
+          kubectl apply -f k8s/postgres-statefulset.yaml
+          kubectl apply -f k8s/postgres-service.yaml
+          kubectl apply -f k8s/redis-deployment.yaml
+          kubectl apply -f k8s/redis-service.yaml
+          kubectl apply -f k8s/ingress.yaml
+          kubectl apply -f k8s/network-policy.yaml
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/autoblog-api -n autoblog --timeout=300s
+          kubectl rollout status deployment/autoblog-web -n autoblog --timeout=300s
+      - name: Health check
+        run: |
+          kubectl run hc --image=curlimages/curl:latest -n autoblog --restart=Never --rm -i -- curl -sf http://autoblog-api:3001/health
+          kubectl run hc2 --image=curlimages/curl:latest -n autoblog --restart=Never --rm -i -- curl -sf http://autoblog-web:3000/health
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          kubectl rollout undo deployment/autoblog-api -n autoblog
+          kubectl rollout undo deployment/autoblog-web -n autoblog

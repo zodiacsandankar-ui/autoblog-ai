@@ -1,0 +1,237 @@
+name: Security Scanning
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+  packages: read
+
+jobs:
+  #############################################################################
+  # npm audit
+  #############################################################################
+  npm-audit:
+    name: npm Audit
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18, 20]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Generate npm audit report
+        run: |
+          npm audit --json > npm-audit-report.json 2>/dev/null || true
+
+      - name: Upload npm audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-report-${{ matrix.node-version }}
+          path: npm-audit-report.json
+          retention-days: 30
+
+  #############################################################################
+  # CodeQL Analysis
+  #############################################################################
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["javascript", "typescript"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+          upload: true
+          output: sarif-results
+
+      - name: Upload CodeQL SARIF
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif-${{ matrix.language }}
+          path: sarif-results/
+          retention-days: 30
+
+  #############################################################################
+  # Trivy Container Scan
+  #############################################################################
+  trivy:
+    name: Trivy Container Scan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        severity: [CRITICAL, HIGH]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image for scanning
+        run: |
+          docker build -t autoblog-ai:${{ github.sha }} .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: autoblog-ai:${{ github.sha }}
+          format: sarif
+          output: trivy-results-${{ matrix.severity }}.sarif
+          severity: ${{ matrix.severity }}
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sarif-${{ matrix.severity }}
+          path: trivy-results-${{ matrix.severity }}.sarif
+          retention-days: 30
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results-${{ matrix.severity }}.sarif
+          category: trivy
+
+      - name: Generate Trivy HTML report
+        if: always()
+        run: |
+          trivy image \
+            --format html \
+            --output trivy-report.html \
+            --severity ${{ matrix.severity }} \
+            autoblog-ai:${{ github.sha }}
+
+      - name: Upload Trivy HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report-${{ matrix.severity }}
+          path: trivy-report.html
+          retention-days: 30
+
+  #############################################################################
+  # Secret Scanning
+  #############################################################################
+  secret-scanning:
+    name: Secret Scanning (Gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Gitleaks (full history scan)
+        run: |
+          docker run \
+            -v ${{ github.workspace }}:/path \
+            -w /path \
+            ghcr.io/gitleaks/gitleaks:latest \
+            detect \
+            --source=/path \
+            --verbose \
+            --report-path=gitleaks-report.json \
+            --report-format=json
+
+      - name: Upload Gitleaks report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+          retention-days: 30
+
+  #############################################################################
+  # Dependency review
+  #############################################################################
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  #############################################################################
+  # Slack notification with security summary
+  #############################################################################
+  security-report:
+    name: Security Report Summary
+    needs: [npm-audit, codeql, trivy, secret-scanning, dependency-review]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Determine overall status
+        id: status
+        run: |
+          if [[ "${{ needs.npm-audit.result }}" == "success" && \
+                "${{ needs.codeql.result }}" == "success" && \
+                "${{ needs.trivy.result }}" == "success" && \
+                "${{ needs.secret-scanning.result }}" == "success" && \
+                "${{ needs.dependency-review.result }}" == "success" ]]; then
+            echo "status=pass" >> $GITHUB_OUTPUT
+          else
+            echo "status=fail" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "channel": "#security",
+              "text": ":shield: Weekly security scan completed:
+              npm audit: ${{ needs.npm-audit.result }}
+              CodeQL: ${{ needs.codeql.result }}
+              Trivy: ${{ needs.trivy.result }}
+              Secret scanning: ${{ needs.secret-scanning.result }}
+              Dependency review: ${{ needs.dependency-review.result }}
+              Overall: ${{ steps.status.outputs.status }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

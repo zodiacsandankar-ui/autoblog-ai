@@ -1,0 +1,158 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autoblog-api
+  namespace: autoblog
+  labels:
+    app.kubernetes.io/name: autoblog
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: autoblog-ai
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: autoblog
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: autoblog
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: autoblog-ai
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+        checksum/config: "${{ .Values.configChecksum | default "" }}"
+    spec:
+      serviceAccountName: autoblog-sa
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: api
+          image: ghcr.io/autoblog-ai/autoblog-ai:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3001
+              name: http
+              protocol: TCP
+            - containerPort: 9090
+              name: metrics
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: autoblog-config
+            - secretRef:
+                name: autoblog-database-credentials
+            - secretRef:
+                name: autoblog-redis-credentials
+            - secretRef:
+                name: autoblog-api-keys
+            - secretRef:
+                name: autoblog-storage-credentials
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: autoblog-database-credentials
+                  key: DATABASE_PASSWORD
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: autoblog-redis-credentials
+                  key: REDIS_PASSWORD
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: 3001
+              httpHeaders:
+                - name: X-Health-Check
+                  value: "true"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3001
+              httpHeaders:
+                - name: X-Health-Check
+                  value: "true"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 3001
+              httpHeaders:
+                - name: X-Health-Check
+                  value: "true"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+            successThreshold: 1
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: api
+                topologyKey: kubernetes.io/hostname
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/component: cache
+                topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/component: api
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: autoblog-sa
+  namespace: autoblog
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::123456789012:role/autoblog-eks-sa-role"

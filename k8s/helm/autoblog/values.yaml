@@ -1,0 +1,514 @@
+# =============================================================================
+# AutoBlog AI - Helm Values
+# =============================================================================
+# This file contains the default configuration values for the AutoBlog AI Helm
+# chart. Override these in environment-specific files (values-production.yaml,
+# values-staging.yaml, etc.)
+
+# =============================================================================
+# Global settings
+# =============================================================================
+global:
+  environment: production
+  domain: autoblog.ai
+  imageRegistry: ghcr.io
+  imagePullSecrets:
+    - name: autoblog-registry-credentials
+  dns:
+    - autoblog.ai
+    - www.autoblog.ai
+    - api.autoblog.ai
+
+# =============================================================================
+# Image configuration
+# =============================================================================
+image:
+  repository: autoblog-ai/autoblog-ai
+  tag: latest
+  pullPolicy: Always
+  api:
+    repository: autoblog-ai/autoblog-ai
+    tag: latest
+    pullPolicy: Always
+  web:
+    repository: autoblog-ai/autoblog-ai
+    tag: latest
+    pullPolicy: Always
+
+# =============================================================================
+# API component configuration
+# =============================================================================
+api:
+  name: autoblog-api
+  enabled: true
+  replicaCount: 3
+  port: 3001
+  metricsPort: 9090
+
+  serviceAccount:
+    create: true
+    name: autoblog-sa
+    annotations:
+      eks.amazonaws.com/role-arn: ""
+
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "512Mi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  probes:
+    liveness:
+      path: /live
+      initialDelaySeconds: 30
+      periodSeconds: 15
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      path: /ready
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    startup:
+      path: /health
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 30
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: api
+            topologyKey: kubernetes.io/hostname
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: api
+
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+    LOG_FORMAT: json
+
+  config:
+    corsOrigin: https://autoblog.ai
+    rateLimitWindowMs: 60000
+    rateLimitMaxRequests: 100
+    rateLimitAuthMaxRequests: 500
+    bodyLimit: 10mb
+
+# =============================================================================
+# Web component configuration
+# =============================================================================
+web:
+  name: autoblog-web
+  enabled: true
+  replicaCount: 3
+  port: 3000
+  metricsPort: 9090
+
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  probes:
+    liveness:
+      path: /live
+      initialDelaySeconds: 30
+      periodSeconds: 15
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      path: /ready
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    startup:
+      path: /health
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 30
+
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: web
+            topologyKey: kubernetes.io/hostname
+
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/component: web
+
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+
+# =============================================================================
+# Database (PostgreSQL) configuration
+# =============================================================================
+postgresql:
+  enabled: true
+  name: autoblog-postgres
+  image: postgres:16-alpine
+  replicaCount: 1
+  port: 5432
+  storageSize: 50Gi
+  storageClass: gp3
+
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+
+  database:
+    name: autoblog
+    user: autoblog
+
+  persistence:
+    enabled: true
+    accessMode: ReadWriteOnce
+    size: 50Gi
+    storageClass: gp3
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# =============================================================================
+# Cache (Redis) configuration
+# =============================================================================
+redis:
+  enabled: true
+  name: autoblog-redis
+  image: redis:7-alpine
+  port: 6379
+  storageSize: 10Gi
+  storageClass: gp3
+
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+
+  persistence:
+    enabled: true
+    accessMode: ReadWriteOnce
+    size: 10Gi
+    storageClass: gp3
+
+  config:
+    maxmemory: 512mb
+    maxmemoryPolicy: allkeys-lru
+    appendonly: true
+
+# =============================================================================
+# Ingress configuration
+# =============================================================================
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/enable-modsecurity: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+  tls:
+    enabled: true
+    secretName: autoblog-tls
+    issuer: letsencrypt-prod
+    issuerKind: ClusterIssuer
+
+  hosts:
+    - host: autoblog.ai
+      paths:
+        - path: /
+          pathType: Prefix
+          service: autoblog-web
+          port: 3000
+    - host: www.autoblog.ai
+      paths:
+        - path: /
+          pathType: Prefix
+          service: autoblog-web
+          port: 3000
+    - host: api.autoblog.ai
+      paths:
+        - path: /
+          pathType: Prefix
+          service: autoblog-api
+          port: 3001
+
+# =============================================================================
+# Network policies
+# =============================================================================
+networkPolicies:
+  enabled: true
+  defaultDeny:
+    ingress: true
+    egress: true
+  api:
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/component: web
+    egress:
+      - to:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/component: database
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/component: cache
+          - ipBlock:
+              cidr: 0.0.0.0/0
+              except:
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+  web:
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+    egress:
+      - to:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/component: api
+          - ipBlock:
+              cidr: 0.0.0.0/0
+              except:
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+  database:
+    ingress:
+      - from:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/component: api
+    egress:
+      - to:
+          - ipBlock:
+              cidr: 0.0.0.0/0
+              except:
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+  cache:
+    ingress:
+      - from:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/component: api
+    egress:
+      - to:
+          - ipBlock:
+              cidr: 0.0.0.0/0
+              except:
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+
+# =============================================================================
+# Monitoring configuration
+# =============================================================================
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      scrapeTimeout: 10s
+      namespace: autoblog
+
+  grafana:
+    enabled: true
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+
+# =============================================================================
+# External Secrets configuration
+# =============================================================================
+externalSecrets:
+  enabled: true
+  secretStore:
+    provider: aws
+    service: SecretsManager
+    region: us-east-1
+  refreshInterval: 1h
+
+# =============================================================================
+# Cert-Manager configuration
+# =============================================================================
+certManager:
+  enabled: true
+  clusterIssuer:
+    name: letsencrypt-prod
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: devops@autoblog.ai
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+
+# =============================================================================
+# Application configuration
+# =============================================================================
+config:
+  app:
+    name: AutoBlog AI
+    url: https://autoblog.ai
+    timezone: UTC
+    locale: en
+
+  ai:
+    provider: openai
+    model: gpt-4o
+    maxTokens: 4096
+    temperature: 0.7
+    timeoutMs: 30000
+
+  blog:
+    maxTitleLength: 200
+    maxExcerptLength: 500
+    defaultContentType: markdown
+    imageGenerationEnabled: true
+    schedulerCron: "0 */6 * * *"
+    cacheTtlSeconds: 3600
+
+  storage:
+    provider: s3
+    bucket: autoblog-ai-content
+    region: us-east-1
+    sslEnabled: true
+    acl: private
+
+  database:
+    host: autoblog-postgres
+    port: 5432
+    name: autoblog
+    sslEnabled: true
+    poolMin: 2
+    poolMax: 20
+    idleTimeoutMs: 10000
+    connectionTimeoutMs: 5000
+
+  redis:
+    host: autoblog-redis
+    port: 6379
+    db: 0
+    enableTls: false
+    prefix: autoblog:
+
+# =============================================================================
+# Secrets (references to external secret stores)
+# =============================================================================
+secrets:
+  database:
+    externalSecretName: autoblog-database-credentials
+    keys:
+      username: DATABASE_USER
+      password: DATABASE_PASSWORD
+  redis:
+    externalSecretName: autoblog-redis-credentials
+    keys:
+      password: REDIS_PASSWORD
+  api:
+    externalSecretName: autoblog-api-keys
+    keys:
+      aiApiKey: AI_API_KEY
+      jwtSecret: JWT_SECRET
+      jwtRefreshSecret: JWT_REFRESH_SECRET
+      sentryDsn: SENTRY_DSN
+      webSessionSecret: WEB_SESSION_SECRET
+  storage:
+    externalSecretName: autoblog-storage-credentials
+    keys:
+      accessKeyId: STORAGE_ACCESS_KEY_ID
+      secretAccessKey: STORAGE_SECRET_ACCESS_KEY
+
+# =============================================================================
+# Namespace configuration
+# =============================================================================
+namespace:
+  name: autoblog
+  resourceQuota:
+    enabled: true
+    hard:
+      requests.cpu: "8"
+      requests.memory: "16Gi"
+      limits.cpu: "16"
+      limits.memory: "32Gi"
+      persistentvolumeclaims: "5"
+      pods: "30"
+      services: "10"
+
+  limitRange:
+    enabled: true
+    default:
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "200m"
+      memory: "256Mi"

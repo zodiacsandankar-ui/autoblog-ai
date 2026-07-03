@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: autoblog-postgres
+  namespace: autoblog
+  labels:
+    app.kubernetes.io/name: autoblog
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: autoblog-ai
+spec:
+  serviceName: autoblog-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: autoblog
+      app.kubernetes.io/component: database
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: autoblog
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: autoblog-ai
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgres
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: autoblog-database-credentials
+                  key: DATABASE_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: autoblog-database-credentials
+                  key: DATABASE_PASSWORD
+            - name: POSTGRES_DB
+              value: "autoblog"
+            - name: PGDATA
+              value: "/var/lib/postgresql/data/pgdata"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "4Gi"
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - autoblog
+                - -d
+                - autoblog
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - autoblog
+                - -d
+                - autoblog
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres
+          securityContext:
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: autoblog
+          app.kubernetes.io/component: database
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 50Gi
+        storageClassName: gp3
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: autoblog-postgres-pdb
+  namespace: autoblog
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: database

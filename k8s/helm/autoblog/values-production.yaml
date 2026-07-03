@@ -1,0 +1,153 @@
+# =============================================================================
+# AutoBlog AI - Production Values Override
+# =============================================================================
+# This file overrides values.yaml for the production environment.
+# Apply with: helm upgrade -i autoblog . -f values.yaml -f values-production.yaml
+
+global:
+  environment: production
+  domain: autoblog.ai
+
+image:
+  tag: latest
+  pullPolicy: Always
+
+api:
+  replicaCount: 5
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 30
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2000m"
+      memory: "1Gi"
+  config:
+    corsOrigin: https://autoblog.ai
+    rateLimitWindowMs: 60000
+    rateLimitMaxRequests: 100
+    rateLimitAuthMaxRequests: 500
+
+web:
+  replicaCount: 5
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 30
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests:
+      cpu: "300m"
+      memory: "384Mi"
+    limits:
+      cpu: "1000m"
+      memory: "768Mi"
+
+postgresql:
+  replicaCount: 2
+  storageSize: 100Gi
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "4Gi"
+    limits:
+      cpu: "4000m"
+      memory: "8Gi"
+  persistence:
+    size: 100Gi
+  database:
+    name: autoblog
+    user: autoblog
+
+redis:
+  storageSize: 20Gi
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  persistence:
+    size: 20Gi
+  config:
+    maxmemory: 1gb
+    maxmemoryPolicy: allkeys-lru
+    appendonly: true
+
+ingress:
+  hosts:
+    - host: autoblog.ai
+      paths:
+        - path: /
+          pathType: Prefix
+          service: autoblog-web
+          port: 3000
+    - host: www.autoblog.ai
+      paths:
+        - path: /
+          pathType: Prefix
+          service: autoblog-web
+          port: 3000
+    - host: api.autoblog.ai
+      paths:
+        - path: /
+          pathType: Prefix
+          service: autoblog-api
+          port: 3001
+  tls:
+    enabled: true
+    secretName: autoblog-tls
+
+config:
+  app:
+    name: AutoBlog AI
+    url: https://autoblog.ai
+  ai:
+    provider: openai
+    model: gpt-4o
+    maxTokens: 8192
+  blog:
+    schedulerCron: "0 */3 * * *"
+    cacheTtlSeconds: 1800
+  storage:
+    bucket: autoblog-ai-content-prod
+  database:
+    poolMin: 5
+    poolMax: 50
+  redis:
+    db: 0
+
+namespace:
+  name: autoblog
+  resourceQuota:
+    enabled: true
+    hard:
+      requests.cpu: "16"
+      requests.memory: "32Gi"
+      limits.cpu: "32"
+      limits.memory: "64Gi"
+      persistentvolumeclaims: "10"
+      pods: "60"
+      services: "20"
+
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 15s
+      scrapeTimeout: 10s
+
+externalSecrets:
+  enabled: true
+  secretStore:
+    provider: aws
+    service: SecretsManager
+    region: us-east-1
+  refreshInterval: 5m

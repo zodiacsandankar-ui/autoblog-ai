@@ -1,0 +1,213 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: autoblog-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: autoblog
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-autoblog_secret}
+      POSTGRES_DB: autoblog
+      POSTGRES_MULTIPLE_DATABASES: autoblog,autoblog_test
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autoblog"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autoblog-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: autoblog-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-autoblog_redis}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - autoblog-network
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.7
+    container_name: autoblog-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-autoblog_meili}
+      MEILI_ENV: development
+      MEILI_DB_PATH: /meili_data
+    volumes:
+      - meili_data:/meili_data
+    ports:
+      - "7700:7700"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autoblog-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: autoblog-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-autoblog_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-autoblog_minio_secret}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - autoblog-network
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+      target: development
+    container_name: autoblog-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://autoblog:${DB_PASSWORD:-autoblog_secret}@postgres:5432/autoblog
+      REDIS_URL: redis://:${REDIS_PASSWORD:-autoblog_redis}@redis:6379
+      MEILI_HOST: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-autoblog_meili}
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_USER:-autoblog_minio}
+      S3_SECRET_KEY: ${MINIO_PASSWORD:-autoblog_minio_secret}
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret_change_in_production}
+    volumes:
+      - ../apps/api:/app/apps/api
+      - ../packages:/app/packages
+      - /app/node_modules
+      - /app/apps/api/node_modules
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    networks:
+      - autoblog-network
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      target: development
+    container_name: autoblog-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_MEILI_URL: http://localhost:7700
+    volumes:
+      - ../apps/web:/app/apps/web
+      - ../packages:/app/packages
+      - /app/node_modules
+      - /app/apps/web/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - autoblog-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: autoblog-nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+      - web
+    networks:
+      - autoblog-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: autoblog-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - "9090:9090"
+    networks:
+      - autoblog-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: autoblog-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    ports:
+      - "3030:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - autoblog-network
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: autoblog-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    networks:
+      - autoblog-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  meili_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  autoblog-network:
+    driver: bridge

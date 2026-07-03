@@ -1,0 +1,59 @@
+apiVersion: v2
+name: autoblog
+description: AutoBlog AI - AI-powered automated blog content generation platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://autoblog.ai
+icon: https://autoblog.ai/favicon.ico
+sources:
+  - https://github.com/autoblog-ai/autoblog-ai
+
+keywords:
+  - blog
+  - ai
+  - content-generation
+  - automated-blogging
+  - nlp
+
+maintainers:
+  - name: AutoBlog AI Team
+    email: devops@autoblog.ai
+    url: https://autoblog.ai
+
+dependencies:
+  - name: postgresql
+    version: ~15.0
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+    alias: postgresql
+  - name: redis
+    version: ~20.0
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+    alias: redis
+  - name: ingress-nginx
+    version: ~4.11.0
+    repository: https://kubernetes.github.io/ingress-nginx
+    condition: ingress-nginx.enabled
+  - name: cert-manager
+    version: ~1.15.0
+    repository: https://charts.jetstack.io
+    condition: cert-manager.enabled
+  - name: external-secrets
+    version: ~0.10.0
+    repository: https://charts.external-secrets.io
+    condition: external-secrets.enabled
+  - name: prometheus
+    version: ~25.0
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: monitoring.enabled
+    alias: prometheus
+
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial Helm chart for AutoBlog AI platform
+  artifacthub.io/containsSecurityUpdates: "false"
+  artifacthub.io/category: ai-machine-learning
+  artifacthub.io/license: MIT

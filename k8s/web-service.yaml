@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: autoblog-web
+  namespace: autoblog
+  labels:
+    app.kubernetes.io/name: autoblog
+    app.kubernetes.io/component: web
+    app.kubernetes.io/part-of: autoblog-ai
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3000"
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: autoblog
+    app.kubernetes.io/component: web
