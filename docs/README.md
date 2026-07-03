@@ -2,7 +2,9 @@
 
 **AI-powered automated blog content generation platform**
 
-AutoBlog AI is a production-grade platform that leverages artificial intelligence to automatically research, generate, edit, and publish blog content. It combines the power of large language models with a robust microservices architecture to deliver scalable, SEO-optimized blogging at scale.
+AutoBlog AI is an enterprise-grade platform that leverages artificial intelligence to automatically research, generate, edit, and publish blog content. It combines the power of large language models (DeepSeek, OpenAI, Claude, Gemini, Mistral, Groq) with a robust microservices architecture to deliver scalable, SEO-optimized blogging at scale.
+
+> **Status:** Active Development — The codebase builds and runs but has TypeScript strictness issues that need cleanup before production deployment. See [Known Issues](#known-issues).
 
 ---
 
@@ -134,32 +136,39 @@ AutoBlog AI is a production-grade platform that leverages artificial intelligenc
 
 ```bash
 # Clone the repository
-git clone https://github.com/autoblog-ai/autoblog-ai.git
+git clone <your-repo-url>
 cd autoblog-ai
+
+# Install pnpm globally if you don't have it
+npm install -g pnpm@8
+
+# Install dependencies
+pnpm install
 
 # Copy environment variables
 cp .env.example .env
+cp apps/api/.env.example apps/api/.env
 
-# Install dependencies
-npm install
+# Edit .env files with your configuration
+# At minimum, set DATABASE_URL, REDIS_URL, and JWT_SECRET
 
-# Start development services (PostgreSQL, Redis)
-docker compose up -d db redis
+# Start PostgreSQL and Redis (requires Docker)
+docker compose -f docker/docker-compose.yml up -d db redis
 
-# Run database migrations
-npm run migrate:up
-
-# Seed development data
-npm run seed
+# Generate Prisma client and run migrations
+cd apps/api
+npx prisma generate
+npx prisma migrate dev --name init
+cd ../..
 
 # Start development servers
-npm run dev
+pnpm dev
 ```
 
 The application will be available at:
 - **Web UI**: http://localhost:3000
 - **API**: http://localhost:3001
-- **API Docs**: http://localhost:3001/api-docs
+- **API Docs (Swagger)**: http://localhost:3001/api/docs
 
 ### Using Docker Compose (Full Stack)
 
@@ -260,20 +269,17 @@ autoblog-ai/
 
 | Script | Description |
 |--------|-------------|
-| `npm run dev` | Start development servers |
-| `npm run build` | Build for production |
-| `npm run start` | Start production servers |
-| `npm run test` | Run all tests |
-| `npm run test:unit` | Run unit tests |
-| `npm run test:integration` | Run integration tests |
-| `npm run test:e2e` | Run end-to-end tests |
-| `npm run test:coverage` | Run tests with coverage |
-| `npm run lint` | Lint codebase |
-| `npm run format` | Format code with Prettier |
-| `npm run migrate:up` | Run database migrations |
-| `npm run migrate:down` | Rollback database migrations |
-| `npm run seed` | Seed development data |
-| `npm run docker:build` | Build Docker image |
+| `pnpm dev` | Start development servers |
+| `pnpm build` | Build for production |
+| `pnpm test` | Run all tests |
+| `pnpm test:e2e` | Run end-to-end tests |
+| `pnpm lint` | Lint codebase |
+| `pnpm format` | Format code with Prettier |
+| `pnpm db:migrate` | Run database migrations |
+| `pnpm db:generate` | Generate Prisma client |
+| `pnpm db:seed` | Seed development data |
+| `pnpm docker:up` | Start Docker services |
+| `pnpm docker:build` | Build Docker images |
 
 ---
 
@@ -319,6 +325,20 @@ We welcome contributions! Please follow these steps:
 - ESLint with recommended rulesets
 - Prettier for consistent formatting
 - Husky pre-commit hooks for linting and testing
+
+---
+
+## Known Issues
+
+This project is in active development. The following areas need attention:
+
+1. **TypeScript Strictness**: Type checking is relaxed (`strict: false`) to allow builds. Many files need proper type annotations — particularly in `blog-generator.service.ts`, `analytics.service.ts`, and AI provider services.
+2. **Prisma Schema Mismatches**: Some service files reference Prisma relations/fields that don't match the current schema. These need to be aligned.
+3. **Import Paths**: Several cross-module imports have been fixed but may need further cleanup as the codebase evolves.
+4. **Missing Tests**: The test infrastructure is set up but test coverage is minimal. Tests need to be written.
+5. **Environment Variables**: Some services (Stripe, email, Meilisearch) are optional but their configuration needs to be properly set for those features to work.
+
+**Contributors welcome!** See [Contributing](#contributing) above.
 
 ---
 
